@@ -1,0 +1,28 @@
+# Build directories
+build/
+cmake-build-*/
+
+# IDE configurations
+.qtcreator/
+.vscode/
+.idea/
+
+# Claude Code configuration
+.claude/
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.out
+*.app
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS files
+.DS_Store
+Thumbs.db
