@@ -60,16 +60,9 @@ bool FreeTypeRenderer::loadFont(const QString &fontPath, int fontSize)
         return false;
     }
 
-    // 设置字符大小（参照官方工具：FT_Set_Char_Size）
-    // size * 64 是因为 FreeType 使用 26.6 固定点格式
-    error = FT_Set_Char_Size(m_face, 0, fontSize * 64, 300, 300);
-    if (error) {
-        m_lastError = QString("Failed to set char size: error %1").arg(error);
-        cleanup();
-        return false;
-    }
-
-    // 设置像素大小（参照官方工具：FT_Set_Pixel_Sizes）
+    // 对于包含内嵌位图的字体（如 wqy-zenhei.ttc），应该只使用 FT_Set_Pixel_Sizes
+    // 这样 FreeType 会优先选择匹配的内嵌位图
+    // 不要使用 FT_Set_Char_Size，因为它会基于 DPI 计算，可能导致尺寸不匹配
     error = FT_Set_Pixel_Sizes(m_face, 0, fontSize);
     if (error) {
         m_lastError = QString("Failed to set pixel sizes: error %1").arg(error);
@@ -84,6 +77,17 @@ bool FreeTypeRenderer::loadFont(const QString &fontPath, int fontSize)
     qDebug() << "  ascender:" << m_face->ascender;
     qDebug() << "  descender:" << m_face->descender;
     qDebug() << "  height:" << m_face->height;
+    qDebug() << "  num_fixed_sizes:" << m_face->num_fixed_sizes;
+
+    // 显示可用的内嵌位图尺寸
+    if (m_face->num_fixed_sizes > 0) {
+        qDebug() << "  Available embedded bitmap sizes (ppem):";
+        for (int i = 0; i < m_face->num_fixed_sizes; i++) {
+            qDebug() << "    Strike" << i << ":"
+                     << m_face->available_sizes[i].width << "x"
+                     << m_face->available_sizes[i].height;
+        }
+    }
 
     return true;
 }
@@ -103,11 +107,12 @@ bool FreeTypeRenderer::renderGlyph(uint32_t charCode, GlyphData &outGlyph)
         return false;
     }
 
-    // 加载字形（参照官方工具的 load_flags）
-    // FT_LOAD_RENDER: 直接渲染为位图
-    // FT_LOAD_TARGET_LIGHT: 使用轻度 hinting（官方工具默认）
-    // FT_LOAD_FORCE_AUTOHINT: 强制使用自动 hinting
-    FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_LIGHT | FT_LOAD_FORCE_AUTOHINT;
+    // 加载字形（优先使用内嵌位图）
+    // 对于包含内嵌位图的字体，FreeType 会自动选择最匹配的 strike
+    // FT_LOAD_DEFAULT: 默认加载，会优先使用内嵌位图
+    // 不使用 FT_LOAD_NO_BITMAP: 允许使用内嵌位图
+    // 不使用 FT_LOAD_FORCE_AUTOHINT: 避免忽略内嵌位图和 hinting
+    FT_Int32 load_flags = FT_LOAD_DEFAULT;
 
     FT_Error error = FT_Load_Glyph(m_face, glyph_index, load_flags);
     if (error) {
@@ -116,6 +121,28 @@ bool FreeTypeRenderer::renderGlyph(uint32_t charCode, GlyphData &outGlyph)
     }
 
     FT_GlyphSlot slot = m_face->glyph;
+
+    // 调试：检查字形格式
+    if (charCode == 'A') {
+        qDebug() << "Glyph 'A' at size" << m_face->size->metrics.y_ppem << "ppem:";
+        qDebug() << "  Format:" << (slot->format == FT_GLYPH_FORMAT_BITMAP ? "BITMAP (embedded)" : "OUTLINE (vector)");
+        if (slot->format == FT_GLYPH_FORMAT_BITMAP) {
+            qDebug() << "  Bitmap pixel_mode:" << slot->bitmap.pixel_mode
+                     << (slot->bitmap.pixel_mode == 1 ? "(MONO)" : slot->bitmap.pixel_mode == 2 ? "(GRAY)" : "");
+        }
+    }
+
+    // 如果是轮廓格式，需要渲染为位图
+    if (slot->format != FT_GLYPH_FORMAT_BITMAP) {
+        error = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
+        if (error) {
+            m_lastError = QString("Failed to render glyph: error %1").arg(error);
+            return false;
+        }
+        if (charCode == 'A') {
+            qDebug() << "  Rendered to bitmap:" << slot->bitmap.width << "x" << slot->bitmap.rows;
+        }
+    }
 
     // 提取字形数据（参照官方工具 freetype/index.js）
     outGlyph.width = slot->bitmap.width;
@@ -135,9 +162,24 @@ bool FreeTypeRenderer::renderGlyph(uint32_t charCode, GlyphData &outGlyph)
         outGlyph.pixels[y].resize(outGlyph.width);
 
         for (int x = 0; x < outGlyph.width; x++) {
-            // FreeType 的位图数据按行存储
+            unsigned char value;
             int pitch = abs(slot->bitmap.pitch);
-            unsigned char value = slot->bitmap.buffer[y * pitch + x];
+
+            // 根据位图格式提取像素值
+            if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
+                // 单色位图：每个像素占1位
+                int byte_index = x / 8;
+                int bit_index = 7 - (x % 8);
+                unsigned char byte_value = slot->bitmap.buffer[y * pitch + byte_index];
+                value = (byte_value & (1 << bit_index)) ? 255 : 0;
+            } else if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_GRAY) {
+                // 灰度位图：每个像素占1字节
+                value = slot->bitmap.buffer[y * pitch + x];
+            } else {
+                // 其他格式，默认为0
+                value = 0;
+            }
+
             outGlyph.pixels[y][x] = value;
         }
     }
