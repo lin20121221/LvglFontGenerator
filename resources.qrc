@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/resources">
+        <file>src/common_chinese_3500.txt</file>
+    </qresource>
+</RCC>

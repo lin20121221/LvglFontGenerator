@@ -59,6 +59,7 @@ set(PROJECT_SOURCES
     src/freetyperenderer.h
     src/kerningoptimizer.cpp
     src/kerningoptimizer.h
+    resources.qrc
 )
 
 if(WIN32)
