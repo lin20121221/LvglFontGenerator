@@ -176,71 +176,6 @@
       </property>
       <layout class="QVBoxLayout" name="verticalLayout_preview">
        <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_preview_controls">
-         <item>
-          <widget class="QLabel" name="labelPreviewText">
-           <property name="text">
-            <string>预览文本:</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLineEdit" name="linePreviewText"/>
-         </item>
-         <item>
-          <widget class="QCheckBox" name="checkShowGrid">
-           <property name="text">
-            <string>显示栅格</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </item>
-       <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_zoom">
-         <item>
-          <widget class="QPushButton" name="btnZoomOut">
-           <property name="text">
-            <string>-</string>
-           </property>
-           <property name="maximumWidth">
-            <number>40</number>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="btnResetZoom">
-           <property name="text">
-            <string>重置</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="btnZoomIn">
-           <property name="text">
-            <string>+</string>
-           </property>
-           <property name="maximumWidth">
-            <number>40</number>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="horizontalSpacer">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </item>
-       <item>
         <layout class="QVBoxLayout" name="previewLayout"/>
        </item>
       </layout>
@@ -261,6 +196,9 @@
     <property name="title">
      <string>文件</string>
     </property>
+    <addaction name="actionLoadConfig"/>
+    <addaction name="actionSaveConfig"/>
+    <addaction name="separator"/>
     <addaction name="actionExit"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
@@ -300,6 +238,16 @@
   <action name="actionSwitchLanguage">
    <property name="text">
     <string>English</string>
+   </property>
+  </action>
+  <action name="actionLoadConfig">
+   <property name="text">
+    <string>载入配置...</string>
+   </property>
+  </action>
+  <action name="actionSaveConfig">
+   <property name="text">
+    <string>保存配置...</string>
    </property>
   </action>
  </widget>

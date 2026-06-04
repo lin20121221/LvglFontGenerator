@@ -1,0 +1,33 @@
+cmake_minimum_required(VERSION 3.16)
+project(TestHarfBuzz)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_AUTOMOC ON)
+
+find_package(Qt6 REQUIRED COMPONENTS Core)
+
+# HarfBuzz
+set(HARFBUZZ_INCLUDE_DIRS "C:/msys64/mingw64/include/harfbuzz")
+set(HARFBUZZ_LIBRARIES "C:/msys64/mingw64/lib/libharfbuzz.dll.a")
+
+# FreeType
+set(FREETYPE_INCLUDE_DIRS "C:/Qt/6.11.0/msvc2022_64/include/QtFreetype")
+set(FREETYPE_LIBRARIES "C:/Qt/6.11.0/msvc2022_64/lib/Qt6BundledFreetype.lib")
+
+add_executable(test_harfbuzz
+    test_harfbuzz.cpp
+    src/harfbuzzkerning.cpp
+    src/harfbuzzkerning.h
+)
+
+target_include_directories(test_harfbuzz PRIVATE
+    src
+    ${HARFBUZZ_INCLUDE_DIRS}
+    ${FREETYPE_INCLUDE_DIRS}
+)
+
+target_link_libraries(test_harfbuzz PRIVATE
+    Qt6::Core
+    ${HARFBUZZ_LIBRARIES}
+    ${FREETYPE_LIBRARIES}
+)

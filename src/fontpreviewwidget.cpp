@@ -24,7 +24,7 @@ FontPreviewWidget::FontPreviewWidget(QWidget *parent)
 
 void FontPreviewWidget::setPreviewText(const QString &text)
 {
-    m_previewText = text;
+    m_previewText = parseUnicodeText(text);
     renderPreview();
     update();
 }
@@ -92,15 +92,17 @@ void FontPreviewWidget::paintEvent(QPaintEvent *event)
         return;
     }
 
-    // 绘制预览图像
+    // 绘制预览图像（使用最近邻插值保持像素清晰）
     painter.save();
     painter.translate(m_offset);
 
+    // 对于像素字体预览，使用最近邻插值（FastTransformation）
+    // 这样可以保持像素边界清晰，不会模糊
     QImage scaledImage = m_previewImage.scaled(
         m_previewImage.width() * m_zoomLevel,
         m_previewImage.height() * m_zoomLevel,
-        Qt::KeepAspectRatio,
-        Qt::FastTransformation
+        Qt::IgnoreAspectRatio,  // 使用精确的整数倍缩放
+        Qt::FastTransformation  // 最近邻插值，保持像素清晰
     );
 
     painter.drawImage(0, 0, scaledImage);
@@ -203,7 +205,7 @@ void FontPreviewWidget::renderPreview()
         return;
     }
 
-    // 始终使用 FreeType 渲染（确保只显示字库中的字符）
+    // 始终使用 FreeType 渲染（不进行量化，显示原始渲染质量）
     renderPreviewWithFreeType();
 }
 
@@ -247,8 +249,8 @@ void FontPreviewWidget::renderPreviewWithQt()
 
     painter.end();
 
-    // 应用抗锯齿处理
-    m_previewImage = applyAntialiasing(tempImage);
+    // 不应用量化处理 - 直接显示原始渲染质量
+    m_previewImage = tempImage.convertToFormat(QImage::Format_Grayscale8);
 }
 
 void FontPreviewWidget::renderPreviewWithFreeType()
@@ -265,6 +267,9 @@ void FontPreviewWidget::renderPreviewWithFreeType()
         m_previewImage = QImage();
         return;
     }
+
+    // 根据 BPP 设置抗锯齿：BPP 1 不使用抗锯齿，其他使用
+    renderer.setAntialiasing(m_bpp > 1);
 
     // 计算总宽度和最大高度
     int totalWidth = 10;
@@ -404,8 +409,9 @@ void FontPreviewWidget::renderPreviewWithFreeType()
         }
     }
 
-    // 应用抗锯齿处理
-    m_previewImage = applyAntialiasing(tempImage);
+    // 不应用量化处理 - 直接显示 FreeType 的原始渲染质量
+    // BPP 量化是在导出时进行的，预览应该显示高质量的渲染结果
+    m_previewImage = tempImage.convertToFormat(QImage::Format_Grayscale8);
 }
 
 QImage FontPreviewWidget::applyAntialiasing(const QImage &source)
@@ -413,7 +419,7 @@ QImage FontPreviewWidget::applyAntialiasing(const QImage &source)
     QImage result = source.convertToFormat(QImage::Format_Grayscale8);
 
     if (m_bpp == 1) {
-        // 1位：纯黑白
+        // 1位：纯黑白（二值化）
         for (int y = 0; y < result.height(); y++) {
             uchar *line = result.scanLine(y);
             for (int x = 0; x < result.width(); x++) {
@@ -421,25 +427,129 @@ QImage FontPreviewWidget::applyAntialiasing(const QImage &source)
             }
         }
     } else if (m_bpp == 2) {
-        // 2位：4级灰度
+        // 2位：4级灰度 (0, 85, 170, 255)
         for (int y = 0; y < result.height(); y++) {
             uchar *line = result.scanLine(y);
             for (int x = 0; x < result.width(); x++) {
-                int level = line[x] / 64;
-                line[x] = level * 85;
+                // 将 0-255 映射到 0-3，然后映射回 0-255
+                int level = (line[x] * 3 + 128) / 255;  // 四舍五入
+                line[x] = (level * 255) / 3;  // 精确映射到 0, 85, 170, 255
             }
         }
     } else if (m_bpp == 4) {
-        // 4位：16级灰度
+        // 4位：16级灰度 (0, 17, 34, ..., 255)
         for (int y = 0; y < result.height(); y++) {
             uchar *line = result.scanLine(y);
             for (int x = 0; x < result.width(); x++) {
-                int level = line[x] / 16;
-                line[x] = level * 17;
+                // 将 0-255 映射到 0-15，然后映射回 0-255
+                int level = (line[x] * 15 + 128) / 255;  // 四舍五入
+                line[x] = (level * 255) / 15;  // 精确映射到 0, 17, 34, ..., 255
             }
         }
     }
     // 8位保持原样（256级灰度）
+
+    return result;
+}
+
+QString FontPreviewWidget::parseUnicodeText(const QString &text)
+{
+    QString result;
+    int i = 0;
+
+    while (i < text.length()) {
+        // 检查是否是 \u 格式 (如 一)
+        if (i + 5 < text.length() && text[i] == '\\' && text[i + 1] == 'u') {
+            QString hexStr = text.mid(i + 2, 4);
+            bool ok;
+            uint codePoint = hexStr.toUInt(&ok, 16);
+            if (ok) {
+                result.append(QChar(codePoint));
+                i += 6;
+                continue;
+            }
+        }
+
+        // 检查是否是 \U 格式 (如 \U0001F600 - 8位十六进制)
+        if (i + 9 < text.length() && text[i] == '\\' && text[i + 1] == 'U') {
+            QString hexStr = text.mid(i + 2, 8);
+            bool ok;
+            uint codePoint = hexStr.toUInt(&ok, 16);
+            if (ok && codePoint <= 0x10FFFF) {
+                result.append(QString::fromUcs4(&codePoint, 1));
+                i += 10;
+                continue;
+            }
+        }
+
+        // 检查是否是 U+ 格式 (如 U+4E00)
+        if (i + 2 < text.length() && text[i] == 'U' && text[i + 1] == '+') {
+            int hexStart = i + 2;
+            int hexEnd = hexStart;
+            // 查找十六进制数字的结束位置（最多8位）
+            while (hexEnd < text.length() && hexEnd < hexStart + 8) {
+                QChar ch = text[hexEnd];
+                if ((ch >= '0' && ch <= '9') ||
+                    (ch >= 'A' && ch <= 'F') ||
+                    (ch >= 'a' && ch <= 'f')) {
+                    hexEnd++;
+                } else {
+                    break;
+                }
+            }
+
+            if (hexEnd > hexStart) {
+                QString hexStr = text.mid(hexStart, hexEnd - hexStart);
+                bool ok;
+                uint codePoint = hexStr.toUInt(&ok, 16);
+                if (ok && codePoint <= 0x10FFFF) {
+                    if (codePoint <= 0xFFFF) {
+                        result.append(QChar(codePoint));
+                    } else {
+                        result.append(QString::fromUcs4(&codePoint, 1));
+                    }
+                    i = hexEnd;
+                    continue;
+                }
+            }
+        }
+
+        // 检查是否是 0x 格式 (如 0x4E00)
+        if (i + 2 < text.length() && text[i] == '0' && (text[i + 1] == 'x' || text[i + 1] == 'X')) {
+            int hexStart = i + 2;
+            int hexEnd = hexStart;
+            // 查找十六进制数字的结束位置（最多8位）
+            while (hexEnd < text.length() && hexEnd < hexStart + 8) {
+                QChar ch = text[hexEnd];
+                if ((ch >= '0' && ch <= '9') ||
+                    (ch >= 'A' && ch <= 'F') ||
+                    (ch >= 'a' && ch <= 'f')) {
+                    hexEnd++;
+                } else {
+                    break;
+                }
+            }
+
+            if (hexEnd > hexStart) {
+                QString hexStr = text.mid(hexStart, hexEnd - hexStart);
+                bool ok;
+                uint codePoint = hexStr.toUInt(&ok, 16);
+                if (ok && codePoint <= 0x10FFFF) {
+                    if (codePoint <= 0xFFFF) {
+                        result.append(QChar(codePoint));
+                    } else {
+                        result.append(QString::fromUcs4(&codePoint, 1));
+                    }
+                    i = hexEnd;
+                    continue;
+                }
+            }
+        }
+
+        // 普通字符，直接添加
+        result.append(text[i]);
+        i++;
+    }
 
     return result;
 }

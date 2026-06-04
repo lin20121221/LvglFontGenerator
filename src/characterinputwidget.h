@@ -11,6 +11,13 @@ class CharacterInputWidget : public QPlainTextEdit
 public:
     explicit CharacterInputWidget(QWidget *parent = nullptr);
 
+    // 获取解析后的字符集
+    QString getAllCharacters() const;
+    int getCharacterCount() const;
+
+    // 设置字体信息（保留以便将来扩展）
+    void setFontInfo(const QString &fontPath, int fontSize);
+
 protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
 
@@ -21,6 +28,7 @@ private slots:
     void addCommonChinese();
     void addBasicPunctuation();
     void addAllASCII();
+    void addByRange();
     void removeDigits();
     void removeUppercaseLetters();
     void removeLowercaseLetters();
@@ -29,9 +37,9 @@ private slots:
     void clearAll();
 
 private:
-    void addCharacters(const QString &chars);
-    void removeCharacters(const QString &chars);
-    QString getCommonChineseCharacters();
+    // 字体信息（保留以便将来扩展字符预览功能）
+    QString m_fontPath;
+    int m_fontSize;
 };
 
 #endif // CHARACTERINPUTWIDGET_H

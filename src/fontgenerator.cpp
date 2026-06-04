@@ -78,6 +78,9 @@ bool FontGenerator::renderGlyphs(const QString &characters, const QString &fontP
         return false;
     }
 
+    int skippedCount = 0;
+    QString skippedChars;
+
     for (const QChar &ch : characters) {
         if (ch == '\n' || ch == '\r') {
             continue;
@@ -89,8 +92,12 @@ bool FontGenerator::renderGlyphs(const QString &characters, const QString &fontP
         // 使用 FreeType 渲染字形
         FreeTypeRenderer::GlyphData ftGlyph;
         if (!renderer.renderGlyph(ch.unicode(), ftGlyph)) {
-            qWarning() << "Failed to render glyph for character" << ch << ":" << renderer.lastError();
-            continue;
+            qWarning() << "Character not in font, skipping:" << ch << QString("(U+%1)").arg(QString::number(ch.unicode(), 16).toUpper().rightJustified(4, '0'));
+            skippedCount++;
+            if (skippedChars.length() < 100) {  // 限制显示的字符数量
+                skippedChars.append(ch);
+            }
+            continue;  // 跳过字库中不存在的字符
         }
 
         // 调试输出第一个字符的信息
@@ -127,6 +134,7 @@ bool FontGenerator::renderGlyphs(const QString &characters, const QString &fontP
                 }
             }
 
+            // 不裁剪，直接使用FreeType返回的位图
             glyph.bitmap = image;
         } else {
             // 对于空字形（如空格），创建空图像，不生成位图数据
@@ -138,11 +146,25 @@ bool FontGenerator::renderGlyphs(const QString &characters, const QString &fontP
         emit progressChanged(m_glyphs.size() * 50 / characters.size());
     }
 
+    // 如果有跳过的字符，记录日志
+    if (skippedCount > 0) {
+        qWarning() << "Skipped" << skippedCount << "characters not in font";
+        if (!skippedChars.isEmpty()) {
+            qWarning() << "Skipped characters:" << skippedChars;
+        }
+    }
+
     return true;
 }
 
 bool FontGenerator::exportToC(const Config &config, const QString &fontPath)
 {
+    // 在导出前按Unicode排序
+    std::sort(m_glyphs.begin(), m_glyphs.end(),
+              [](const GlyphData &a, const GlyphData &b) {
+                  return a.character.unicode() < b.character.unicode();
+              });
+
     LvglExporter exporter;
     exporter.setConfig(config.lvglVersion, config.isExternal, config.bpp, config.enableKerning);
     exporter.setFontName(config.outputName);
@@ -178,6 +200,12 @@ bool FontGenerator::exportToC(const Config &config, const QString &fontPath)
 
 bool FontGenerator::exportToBin(const Config &config)
 {
+    // 在导出前按Unicode排序（如果还没排序的话，这里是冗余保护）
+    std::sort(m_glyphs.begin(), m_glyphs.end(),
+              [](const GlyphData &a, const GlyphData &b) {
+                  return a.character.unicode() < b.character.unicode();
+              });
+
     LvglExporter exporter;
     exporter.setConfig(config.lvglVersion, config.isExternal, config.bpp, config.enableKerning);
     exporter.setFontName(config.outputName);

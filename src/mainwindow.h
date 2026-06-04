@@ -5,7 +5,7 @@
 #include <QString>
 #include <QTranslator>
 #include "fontgenerator.h"
-#include "fontpreviewwidget.h"
+#include "charactergridwidget.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -27,22 +27,21 @@ private slots:
     void onCharactersChanged();
     void onFontSizeChanged(int size);
     void onBppChanged(int index);
-    void onPreviewTextChanged();
-    void onShowGridToggled(bool checked);
-    void onKerningToggled(bool checked);
-    void onZoomIn();
-    void onZoomOut();
-    void onResetZoom();
     void onShowUsage();
     void onShowAbout();
     void onSwitchLanguage();
+    void onCharacterDoubleClicked(QChar ch);
+    void onLoadConfig();
+    void onSaveConfig();
 
 private:
     void setupUi();
-    void updatePreview();
+    void updateCharacterGrid();
     bool validateInputs();
     void updateFontInfo();
     void retranslateUi();
+    void loadConfigFromFile(const QString &filePath);
+    void saveConfigToFile(const QString &filePath);
     QString getUsageTextChinese();
     QString getUsageTextEnglish();
     QString getAboutTextChinese();
@@ -50,7 +49,7 @@ private:
 
     Ui::MainWindow *ui;
     FontGenerator *fontGenerator;
-    FontPreviewWidget *previewWidget;
+    CharacterGridWidget *characterGridWidget;
     QString currentFontPath;
     QString lastFontDirectory;
     QFont currentFont;

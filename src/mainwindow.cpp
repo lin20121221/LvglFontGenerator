@@ -13,12 +13,17 @@
 #include <QLineEdit>
 #include <QSettings>
 #include <QApplication>
+#include <QTimer>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QFile>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , fontGenerator(new FontGenerator(this))
-    , previewWidget(new FontPreviewWidget(this))
+    , characterGridWidget(new CharacterGridWidget(this))
     , currentFontId(-1)
     , isEnglish(false)
 {
@@ -44,24 +49,31 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onFontSizeChanged);
     connect(ui->comboBpp, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onBppChanged);
-    connect(ui->linePreviewText, &QLineEdit::textChanged,
-            this, &MainWindow::onPreviewTextChanged);
-    connect(ui->checkShowGrid, &QCheckBox::toggled,
-            this, &MainWindow::onShowGridToggled);
-    connect(ui->checkEnableKerning, &QCheckBox::toggled,
-            this, &MainWindow::onKerningToggled);
-    connect(ui->btnZoomIn, &QPushButton::clicked,
-            this, &MainWindow::onZoomIn);
-    connect(ui->btnZoomOut, &QPushButton::clicked,
-            this, &MainWindow::onZoomOut);
-    connect(ui->btnResetZoom, &QPushButton::clicked,
-            this, &MainWindow::onResetZoom);
     connect(ui->actionUsage, &QAction::triggered,
             this, &MainWindow::onShowUsage);
     connect(ui->actionAbout, &QAction::triggered,
             this, &MainWindow::onShowAbout);
     connect(ui->actionSwitchLanguage, &QAction::triggered,
             this, &MainWindow::onSwitchLanguage);
+    connect(ui->actionLoadConfig, &QAction::triggered,
+            this, &MainWindow::onLoadConfig);
+    connect(ui->actionSaveConfig, &QAction::triggered,
+            this, &MainWindow::onSaveConfig);
+    connect(characterGridWidget, &CharacterGridWidget::characterDoubleClicked,
+            this, &MainWindow::onCharacterDoubleClicked);
+    connect(characterGridWidget, &CharacterGridWidget::renderProgress,
+            this, [this](int current, int total) {
+                if (total > 0) {
+                    int percent = (current * 100) / total;
+                    ui->progressBar->setValue(percent);
+                    if (current == total) {
+                        // 渲染完成后清空进度条
+                        QTimer::singleShot(500, this, [this]() {
+                            ui->progressBar->setValue(0);
+                        });
+                    }
+                }
+            });
 
     retranslateUi();
 }
@@ -98,14 +110,9 @@ void MainWindow::setupUi()
                                            "你好世界");
 
     ui->lineOutputName->setPlaceholderText("my_font");
-    ui->linePreviewText->setPlaceholderText("输入预览文本...");
-    ui->linePreviewText->setText("Ag字");
 
-    ui->checkShowGrid->setChecked(true);
-    ui->checkEnableKerning->setChecked(false);  // 默认关闭Kerning
-
-    // 将预览控件添加到布局
-    ui->previewLayout->addWidget(previewWidget);
+    // 直接添加字符网格到预览布局，不使用选项卡
+    ui->previewLayout->addWidget(characterGridWidget);
 
     ui->btnGenerate->setEnabled(false);
 }
@@ -175,7 +182,7 @@ void MainWindow::onSelectFontFile()
             currentFont = QFont(fontFamilies.first(), ui->spinFontSize->value());
             currentFont.setPixelSize(ui->spinFontSize->value());
             updateFontInfo();
-            updatePreview();
+            updateCharacterGrid();
         } else {
             QMessageBox::warning(this, isEnglish ? "Error" : "错误",
                                isEnglish ? "Unable to read font information from file"
@@ -310,7 +317,7 @@ void MainWindow::onSelectSystemFont()
         currentFont = QFont(selectedFamily, ui->spinFontSize->value());
         currentFont.setPixelSize(ui->spinFontSize->value());
         updateFontInfo();
-        updatePreview();
+        updateCharacterGrid();
     } else {
         QMessageBox::warning(this, isEnglish ? "Error" : "错误",
                            isEnglish ? "Unable to load font file"
@@ -366,7 +373,7 @@ void MainWindow::onGenerate()
     FontGenerator::Config config;
     config.fontPath = currentFontPath;
     config.fontSize = ui->spinFontSize->value();
-    config.characters = ui->textCharacters->toPlainText();
+    config.characters = ui->textCharacters->getAllCharacters();  // 使用新方法获取所有字符
     config.outputName = ui->lineOutputName->text();
     config.lvglVersion = 9;  // 生成兼容LVGL 8.x和9.x的代码
     config.isExternal = ui->comboFontType->currentIndex() == 1;
@@ -418,36 +425,17 @@ void MainWindow::onFontTypeChanged(int index)
 
 void MainWindow::onCharactersChanged()
 {
-    QString text = ui->textCharacters->toPlainText();
-    QSet<QChar> uniqueChars;
-    for (const QChar &ch : text) {
-        if (!ch.isSpace() || ch == ' ') {
-            uniqueChars.insert(ch);
-        }
-    }
+    int charCount = ui->textCharacters->getCharacterCount();
 
     ui->labelCharCount->setText(
-        isEnglish ? QString("Character Count: %1").arg(uniqueChars.size())
-                  : QString("字符数: %1").arg(uniqueChars.size()));
+        isEnglish ? QString("Character Count: %1").arg(charCount)
+                  : QString("字符数: %1").arg(charCount));
+
+    // 更新字符网格
+    updateCharacterGrid();
 
     // 更新按钮状态
     ui->btnGenerate->setEnabled(validateInputs());
-}
-
-void MainWindow::updatePreview()
-{
-    if (currentFont.family().isEmpty()) {
-        return;
-    }
-
-    previewWidget->setFont(currentFont);
-    previewWidget->setFontPath(currentFontPath, ui->spinFontSize->value());
-    previewWidget->setPreviewText(ui->linePreviewText->text());
-    previewWidget->setEnableKerning(ui->checkEnableKerning->isChecked());
-
-    int bppIndex = ui->comboBpp->currentIndex();
-    int bpp = (bppIndex == 0) ? 1 : (bppIndex == 1) ? 2 : (bppIndex == 2) ? 4 : 8;
-    previewWidget->setAntialiasing(bpp);
 }
 
 void MainWindow::onFontSizeChanged(int size)
@@ -455,44 +443,14 @@ void MainWindow::onFontSizeChanged(int size)
     if (!currentFont.family().isEmpty()) {
         currentFont.setPixelSize(size);
         updateFontInfo();
-        updatePreview();
+        updateCharacterGrid();
     }
 }
 
 void MainWindow::onBppChanged(int index)
 {
     Q_UNUSED(index);
-    updatePreview();
-}
-
-void MainWindow::onPreviewTextChanged()
-{
-    updatePreview();
-}
-
-void MainWindow::onShowGridToggled(bool checked)
-{
-    previewWidget->setShowGrid(checked);
-}
-
-void MainWindow::onKerningToggled(bool checked)
-{
-    previewWidget->setEnableKerning(checked);
-}
-
-void MainWindow::onZoomIn()
-{
-    previewWidget->setZoomLevel(previewWidget->zoomLevel() + 1);
-}
-
-void MainWindow::onZoomOut()
-{
-    previewWidget->setZoomLevel(previewWidget->zoomLevel() - 1);
-}
-
-void MainWindow::onResetZoom()
-{
-    previewWidget->setZoomLevel(4);
+    updateCharacterGrid();
 }
 
 void MainWindow::onShowUsage()
@@ -778,6 +736,185 @@ void MainWindow::onSwitchLanguage()
     retranslateUi();
 }
 
+void MainWindow::onLoadConfig()
+{
+    QString fileName = QFileDialog::getOpenFileName(
+        this,
+        isEnglish ? "Load Configuration" : "载入配置",
+        lastFontDirectory,
+        isEnglish ? "Config Files (*.json);;All Files (*.*)" : "配置文件 (*.json);;所有文件 (*.*)"
+    );
+
+    if (fileName.isEmpty()) {
+        return;
+    }
+
+    loadConfigFromFile(fileName);
+}
+
+void MainWindow::onSaveConfig()
+{
+    QString fileName = QFileDialog::getSaveFileName(
+        this,
+        isEnglish ? "Save Configuration" : "保存配置",
+        lastFontDirectory + "/font_config.json",
+        isEnglish ? "Config Files (*.json);;All Files (*.*)" : "配置文件 (*.json);;所有文件 (*.*)"
+    );
+
+    if (fileName.isEmpty()) {
+        return;
+    }
+
+    // 确保文件扩展名
+    if (!fileName.endsWith(".json", Qt::CaseInsensitive)) {
+        fileName += ".json";
+    }
+
+    saveConfigToFile(fileName);
+}
+
+void MainWindow::loadConfigFromFile(const QString &filePath)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, isEnglish ? "Error" : "错误",
+                           isEnglish ? "Cannot open config file" : "无法打开配置文件");
+        return;
+    }
+
+    QByteArray data = file.readAll();
+    file.close();
+
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+
+    if (parseError.error != QJsonParseError::NoError) {
+        QMessageBox::warning(this, isEnglish ? "Error" : "错误",
+                           isEnglish ? QString("Invalid config file: %1").arg(parseError.errorString())
+                                     : QString("无效的配置文件: %1").arg(parseError.errorString()));
+        return;
+    }
+
+    QJsonObject config = doc.object();
+
+    // 载入字体路径
+    if (config.contains("fontPath")) {
+        QString fontPath = config["fontPath"].toString();
+        if (QFile::exists(fontPath)) {
+            currentFontPath = fontPath;
+            ui->lineFontPath->setText(fontPath);
+
+            // 移除之前加载的字体
+            if (currentFontId != -1) {
+                QFontDatabase::removeApplicationFont(currentFontId);
+            }
+
+            currentFontId = QFontDatabase::addApplicationFont(fontPath);
+            if (currentFontId != -1) {
+                QStringList fontFamilies = QFontDatabase::applicationFontFamilies(currentFontId);
+                if (!fontFamilies.isEmpty()) {
+                    int fontSize = config.contains("fontSize") ? config["fontSize"].toInt() : 16;
+                    currentFont = QFont(fontFamilies.first(), fontSize);
+                    currentFont.setPixelSize(fontSize);
+                }
+            }
+        } else {
+            QMessageBox::warning(this, isEnglish ? "Warning" : "警告",
+                               isEnglish ? QString("Font file not found: %1").arg(fontPath)
+                                         : QString("字体文件不存在: %1").arg(fontPath));
+        }
+    }
+
+    // 载入字体大小
+    if (config.contains("fontSize")) {
+        ui->spinFontSize->setValue(config["fontSize"].toInt());
+    }
+
+    // 载入字体类型
+    if (config.contains("fontType")) {
+        ui->comboFontType->setCurrentIndex(config["fontType"].toInt());
+    }
+
+    // 载入BPP
+    if (config.contains("bpp")) {
+        int bppValue = config["bpp"].toInt();
+        int index = 0;
+        switch (bppValue) {
+            case 1: index = 0; break;
+            case 2: index = 1; break;
+            case 4: index = 2; break;
+            case 8: index = 3; break;
+            default: index = 2; break;
+        }
+        ui->comboBpp->setCurrentIndex(index);
+    }
+
+    // 载入输出名称
+    if (config.contains("outputName")) {
+        ui->lineOutputName->setText(config["outputName"].toString());
+    }
+
+    // 载入Kerning设置
+    if (config.contains("enableKerning")) {
+        ui->checkEnableKerning->setChecked(config["enableKerning"].toBool());
+    }
+
+    // 载入字符集
+    if (config.contains("characters")) {
+        ui->textCharacters->setPlainText(config["characters"].toString());
+    }
+
+    // 更新UI
+    updateFontInfo();
+    updateCharacterGrid();
+
+    QMessageBox::information(this, isEnglish ? "Success" : "成功",
+                           isEnglish ? "Configuration loaded successfully" : "配置载入成功");
+}
+
+void MainWindow::saveConfigToFile(const QString &filePath)
+{
+    QJsonObject config;
+
+    // 保存字体路径
+    config["fontPath"] = currentFontPath;
+
+    // 保存字体大小
+    config["fontSize"] = ui->spinFontSize->value();
+
+    // 保存字体类型
+    config["fontType"] = ui->comboFontType->currentIndex();
+
+    // 保存BPP
+    int bppIndex = ui->comboBpp->currentIndex();
+    int bpp = (bppIndex == 0) ? 1 : (bppIndex == 1) ? 2 : (bppIndex == 2) ? 4 : 8;
+    config["bpp"] = bpp;
+
+    // 保存输出名称
+    config["outputName"] = ui->lineOutputName->text();
+
+    // 保存Kerning设置
+    config["enableKerning"] = ui->checkEnableKerning->isChecked();
+
+    // 保存字符集
+    config["characters"] = ui->textCharacters->toPlainText();
+
+    // 写入文件
+    QJsonDocument doc(config);
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, isEnglish ? "Error" : "错误",
+                           isEnglish ? "Cannot save config file" : "无法保存配置文件");
+        return;
+    }
+
+    file.write(doc.toJson(QJsonDocument::Indented));
+    file.close();
+
+    QMessageBox::information(this, isEnglish ? "Success" : "成功",
+                           isEnglish ? "Configuration saved successfully" : "配置保存成功");
+}
+
 void MainWindow::retranslateUi()
 {
     // 更新窗口标题
@@ -788,6 +925,8 @@ void MainWindow::retranslateUi()
     ui->menuHelp->setTitle(isEnglish ? "Help" : "帮助");
     ui->menuLanguage->setTitle(isEnglish ? "语言" : "Language");
     ui->actionExit->setText(isEnglish ? "Exit" : "退出");
+    ui->actionLoadConfig->setText(isEnglish ? "Load Configuration..." : "载入配置...");
+    ui->actionSaveConfig->setText(isEnglish ? "Save Configuration..." : "保存配置...");
     ui->actionUsage->setText(isEnglish ? "Usage Guide" : "使用说明");
     ui->actionAbout->setText(isEnglish ? "About" : "关于");
     ui->actionSwitchLanguage->setText(isEnglish ? "中文" : "English");
@@ -796,7 +935,7 @@ void MainWindow::retranslateUi()
     ui->groupFont->setTitle(isEnglish ? "Font Settings" : "字体设置");
     ui->groupCharacters->setTitle(isEnglish ? "Character Settings" : "字符设置");
     ui->groupConfig->setTitle(isEnglish ? "Generation Config" : "生成配置");
-    ui->groupPreview->setTitle(isEnglish ? "Font Preview" : "字体预览");
+    ui->groupPreview->setTitle(isEnglish ? "Character Preview" : "字符预览");
 
     // 更新标签
     ui->labelFontFile->setText(isEnglish ? "Font File:" : "字体文件:");
@@ -805,16 +944,13 @@ void MainWindow::retranslateUi()
     ui->labelBpp->setText(isEnglish ? "Antialiasing:" : "抗锯齿:");
     ui->labelOutputName->setText(isEnglish ? "Output Name:" : "输出名称:");
     ui->labelKerning->setText(isEnglish ? "Kerning:" : "字距调整:");
-    ui->labelPreviewText->setText(isEnglish ? "Preview Text:" : "预览文本:");
 
     // 更新按钮
     ui->btnSelectFont->setText(isEnglish ? "Browse..." : "浏览...");
     ui->btnSystemFont->setText(isEnglish ? "System Fonts..." : "系统字体...");
     ui->btnGenerate->setText(isEnglish ? "Generate Font" : "生成字体");
-    ui->btnResetZoom->setText(isEnglish ? "Reset" : "重置");
 
     // 更新复选框
-    ui->checkShowGrid->setText(isEnglish ? "Show Grid" : "显示栅格");
     ui->checkEnableKerning->setText(isEnglish ? "Enable Kerning" : "启用Kerning");
     ui->checkEnableKerning->setToolTip(isEnglish
         ? "Enable kerning to optimize spacing between specific character pairs for better appearance (disabled by default)"
@@ -832,8 +968,8 @@ void MainWindow::retranslateUi()
     ui->comboBpp->addItem(isEnglish ? "8-bit (256 Gray Levels)" : "8位 (256级灰度)");
     ui->comboBpp->setCurrentIndex(2);
 
-    // 更新预览控件语言
-    previewWidget->setLanguage(isEnglish);
+    // 更新字符网格语言（如果需要的话）
+    // characterGridWidget->setLanguage(isEnglish);
 
     // 更新字体信息
     updateFontInfo();
@@ -845,13 +981,43 @@ void MainWindow::retranslateUi()
     onFontTypeChanged(ui->comboFontType->currentIndex());
 }
 
+void MainWindow::updateCharacterGrid()
+{
+    if (currentFontPath.isEmpty()) {
+        return;
+    }
+
+    // 获取当前输入的所有字符
+    QString characters = ui->textCharacters->getAllCharacters();
+
+    // 设置字符列表
+    characterGridWidget->setCharacters(characters);
+
+    // 获取当前的BPP设置
+    int bppIndex = ui->comboBpp->currentIndex();
+    int bpp = (bppIndex == 0) ? 1 : (bppIndex == 1) ? 2 : (bppIndex == 2) ? 4 : 8;
+
+    // 设置字体信息
+    characterGridWidget->setFontInfo(currentFontPath, ui->spinFontSize->value(), bpp);
+
+    // 刷新显示
+    characterGridWidget->refreshDisplay();
+}
+
+void MainWindow::onCharacterDoubleClicked(QChar ch)
+{
+    // 当字符网格中的字符被双击时，可以添加其他操作
+    // 例如：滚动到该字符在预览中的位置
+    Q_UNUSED(ch);
+}
+
 bool MainWindow::validateInputs()
 {
     if (currentFontPath.isEmpty()) {
         return false;
     }
 
-    if (ui->textCharacters->toPlainText().isEmpty()) {
+    if (ui->textCharacters->getCharacterCount() == 0) {
         return false;
     }
 

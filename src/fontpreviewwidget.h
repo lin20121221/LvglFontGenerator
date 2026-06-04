@@ -41,6 +41,7 @@ private:
     QImage applyAntialiasing(const QImage &source);
     void centerPreview();
     void resetPosition();
+    QString parseUnicodeText(const QString &text);  // 解析Unicode码点
 
     QString m_previewText;
     QFont m_font;
